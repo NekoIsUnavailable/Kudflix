@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Pencil, Plus, Search, Trash2, X } from 'lucide-react';
+import { Pencil, Plus, Search, Shuffle, Trash2, X } from 'lucide-react';
 import {
   VideoCard,
   getVideoWatched,
@@ -193,6 +193,13 @@ export function UserListGridModal({
     setPanel('titles');
   };
 
+  const playRandomFromList = () => {
+    if (sortedListVideos.length === 0) return;
+    const pick = sortedListVideos[Math.floor(Math.random() * sortedListVideos.length)];
+    onClose();
+    onPlay(pick);
+  };
+
   if (!list) {
     return createPortal(
       <div className="fixed inset-0 z-[500] bg-[#141414] flex items-center justify-center">
@@ -319,6 +326,15 @@ export function UserListGridModal({
                   buttonClassName="w-auto min-w-[10rem]"
                   menuZIndex={550}
                 />
+                {sortedListVideos.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={playRandomFromList}
+                    className="flex items-center gap-2 bg-white text-black px-4 py-2 rounded font-bold text-sm hover:bg-white/80 transition"
+                  >
+                    <Shuffle className="w-4 h-4" /> Play random
+                  </button>
+                )}
               </div>
               <div className="flex-1 overflow-y-auto px-10 pl-14 pb-10 min-h-0 overscroll-contain">
                 {sortedListVideos.length === 0 ? (

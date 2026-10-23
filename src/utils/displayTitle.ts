@@ -1,5 +1,5 @@
 import type { LocalFile } from '../components/NetflixUI';
-import { getSeriesRoot } from './grouping';
+import { getSeriesRootFromFile } from './grouping';
 import { getMediaOverride } from './mediaOverrides';
 import { parseSeriesFolderName } from './metadata';
 
@@ -12,8 +12,8 @@ export function getLibraryDisplayTitle(video: LocalFile): string {
 export function getPlayerDisplayTitle(video: LocalFile): string {
   if (video.isFolder) return getLibraryDisplayTitle(video);
 
-  const root = getSeriesRoot(video.relativePath);
-  if (video.category === 'tv' && root) {
+  const root = getSeriesRootFromFile(video);
+  if ((video.category === 'tv' || video.category === 'anime') && root) {
     const folderKey = `folder://${root}`;
     const overrideTitle = getMediaOverride(folderKey)?.title?.trim();
     if (overrideTitle) return overrideTitle;

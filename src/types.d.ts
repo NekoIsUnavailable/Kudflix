@@ -40,6 +40,8 @@ declare global {
     startTime: number;
     prev?: { path: string; title: string; subtitle?: string; thumbnail?: string } | null;
     next: { path: string; title: string; subtitle?: string; thumbnail?: string } | null;
+    /** Per-show next-episode window before end (seconds); 0 = default 20s. */
+    outroSkipSeconds?: number;
     /** Names the player window so it is recognisable in screen-share pickers. */
     appName?: string;
   }

@@ -13,7 +13,13 @@ import {
   DEFAULT_APP_NAME,
 } from '../utils/settings';
 import { normalizeStoredProfiles } from '../utils/profiles';
-import { ThemedSelect, WATCHED_INDICATOR_OPTIONS, DETAIL_MODAL_ACTIONS_OPTIONS } from './ThemedSelect';
+import {
+  ThemedSelect,
+  WATCHED_INDICATOR_OPTIONS,
+  DETAIL_MODAL_ACTIONS_OPTIONS,
+  WATCH_ONLINE_NAV_OPTIONS,
+  DISCORD_ACTIVITY_STYLE_OPTIONS,
+} from './ThemedSelect';
 import { ConfirmDialog } from './ConfirmDialog';
 
 export interface Settings {
@@ -26,6 +32,8 @@ export interface Settings {
   externalPlayerPath: string;
   movieFolders: string[];
   tvFolders: string[];
+  /** TV library roots whose child folders are shows (not the root itself). */
+  tvParentFolders?: string[];
   animeFolders?: string[];
   skipProfilePicker: boolean;
   defaultProfileId: string | null;
@@ -37,6 +45,7 @@ export interface Settings {
   detailModalActionsMode: 'icons' | 'menu';
   discordRpcEnabled?: boolean;
   discordActivityStyle?: 'media' | 'watching' | 'playing';
+  watchOnlineNav?: 'text' | 'icon' | 'hidden';
 }
 
 const RECENT_COLORS = ['#E50914', '#003e8f', '#bc13fe', '#555555', '#7b4cff'];
@@ -61,6 +70,7 @@ export function SettingsModal({ onClose, onSave, currentSettings, activeProfileI
     appName: truncateAppName(currentSettings.appName ?? DEFAULT_APP_NAME),
     movieFolders: currentSettings.movieFolders ?? [],
     tvFolders: currentSettings.tvFolders ?? [],
+    tvParentFolders: currentSettings.tvParentFolders ?? [],
     animeFolders: currentSettings.animeFolders ?? [],
     skipProfilePicker: currentSettings.skipProfilePicker ?? false,
     defaultProfileId: currentSettings.defaultProfileId ?? null,
@@ -70,7 +80,8 @@ export function SettingsModal({ onClose, onSave, currentSettings, activeProfileI
     watchedIndicatorMode: currentSettings.watchedIndicatorMode ?? 'always',
     detailModalActionsMode: currentSettings.detailModalActionsMode ?? 'menu',
     discordRpcEnabled: currentSettings.discordRpcEnabled ?? true,
-    discordActivityStyle: currentSettings.discordActivityStyle ?? 'media',
+    discordActivityStyle: currentSettings.discordActivityStyle ?? 'watching',
+    watchOnlineNav: currentSettings.watchOnlineNav ?? 'text',
   });
   const [activeTab, setActiveTab] = useState<'general' | 'library' | 'personalization' | 'profiles' | 'advanced'>(initialTab);
   const [isDefaultTmdbKeyMode, setIsDefaultTmdbKeyMode] = useState(
@@ -184,7 +195,23 @@ export function SettingsModal({ onClose, onSave, currentSettings, activeProfileI
 
   const removeFolder = (type: 'movie' | 'tv' | 'anime', folder: string) => {
     const key = type === 'movie' ? 'movieFolders' : type === 'tv' ? 'tvFolders' : 'animeFolders';
-    setSettings({ ...settings, [key]: (settings[key] ?? []).filter(f => f !== folder) });
+    const nextParents =
+      type === 'tv'
+        ? (settings.tvParentFolders ?? []).filter((p) => p !== folder)
+        : settings.tvParentFolders;
+    setSettings({
+      ...settings,
+      [key]: (settings[key] ?? []).filter((f) => f !== folder),
+      tvParentFolders: nextParents,
+    });
+  };
+
+  const toggleTvParentFolder = (folder: string) => {
+    const current = settings.tvParentFolders ?? [];
+    const next = current.includes(folder)
+      ? current.filter((p) => p !== folder)
+      : [...current, folder];
+    setSettings({ ...settings, tvParentFolders: next });
   };
 
   const handleCustomAvatarUpload = () => {
@@ -201,11 +228,11 @@ export function SettingsModal({ onClose, onSave, currentSettings, activeProfileI
         onApply={applyCrop}
       />
     )}
-    <div className="fixed inset-0 z-[200] bg-black/80 overflow-y-auto p-4">
-      <div className="mx-auto flex min-h-full w-full max-w-[920px] items-center justify-center py-2">
-      <div className="bg-[#181818] w-full max-h-[calc(100vh-2rem)] rounded-xl shadow-2xl border border-gray-800 flex flex-col md:flex-row overflow-hidden min-h-0">
+    <div className="fixed inset-0 z-[200] bg-black/80 overflow-hidden p-4 flex items-center justify-center">
+      <div className="w-full max-w-[920px] h-[min(720px,calc(100vh-4rem))] flex">
+      <div className="bg-[#181818] w-full h-full rounded-xl shadow-2xl border border-gray-800 flex flex-col md:flex-row overflow-hidden min-h-0">
         {/* Sidebar Tabs */}
-        <div className="w-full md:w-1/3 bg-[#111] p-4 md:p-6 border-b md:border-b-0 md:border-r border-gray-800 flex flex-col gap-2 shrink-0 overflow-y-auto max-h-[40vh] md:max-h-none min-h-0">
+        <div className="w-full md:w-1/3 bg-[#111] p-4 md:p-6 border-b md:border-b-0 md:border-r border-gray-800 flex flex-col gap-2 shrink-0 overflow-y-auto min-h-0">
           <h2 className="text-xl font-bold mb-6 text-white px-2">Settings</h2>
           
           <button 
@@ -291,6 +318,21 @@ export function SettingsModal({ onClose, onSave, currentSettings, activeProfileI
                 />
               </div>
 
+              <div className="flex items-center justify-between gap-4 bg-black/50 border border-gray-700 rounded-lg px-4 py-3">
+                <div>
+                  <p className="text-sm font-semibold text-gray-300">Watch Online Tab Style</p>
+                  <p className="text-xs text-gray-500 mt-1">Next to Movies in the header.</p>
+                </div>
+                <ThemedSelect
+                  value={settings.watchOnlineNav ?? 'text'}
+                  onChange={(v) => setSettings({ ...settings, watchOnlineNav: v })}
+                  options={WATCH_ONLINE_NAV_OPTIONS}
+                  className="w-40 shrink-0"
+                  buttonClassName="px-3 py-2 bg-black/70 border-gray-700 text-xs w-full"
+                  menuZIndex={450}
+                />
+              </div>
+
               <div className="flex items-center justify-between bg-black/50 border border-gray-700 rounded-lg px-4 py-3">
                 <div>
                   <p className="text-sm font-semibold text-gray-300">Icon-only library button</p>
@@ -307,12 +349,9 @@ export function SettingsModal({ onClose, onSave, currentSettings, activeProfileI
                 </button>
               </div>
 
-              <div className="bg-black/50 border border-gray-700 rounded-lg p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-gray-300">Discord Rich Presence</p>
-                    <p className="text-xs text-gray-500 mt-1">Broadcast current video title, artwork, and progress to Discord.</p>
-                  </div>
+              <div className="bg-black/50 border border-gray-700 rounded-lg px-4 py-3 space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-gray-300">Discord Rich Presence</p>
                   <button
                     type="button"
                     role="switch"
@@ -322,34 +361,25 @@ export function SettingsModal({ onClose, onSave, currentSettings, activeProfileI
                       setSettings({ ...settings, discordRpcEnabled: next });
                       window.electronAPI?.setDiscordRpcEnabled?.(next);
                     }}
-                    className={`relative w-12 h-6 rounded-full transition ${(settings.discordRpcEnabled ?? true) ? 'bg-accent' : 'bg-gray-600'}`}
+                    className={`relative w-12 h-6 rounded-full transition shrink-0 ${(settings.discordRpcEnabled ?? true) ? 'bg-accent' : 'bg-gray-600'}`}
                   >
                     <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${(settings.discordRpcEnabled ?? true) ? 'translate-x-6' : ''}`} />
                   </button>
                 </div>
-
                 {(settings.discordRpcEnabled ?? true) && (
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-400 mb-1.5">Presence Timeline Style</label>
+                  <>
                     <ThemedSelect
-                      value={settings.discordActivityStyle ?? 'media'}
+                      value={settings.discordActivityStyle ?? 'watching'}
                       onChange={(v) => {
-                        const style = v as 'media' | 'watching' | 'playing';
-                        setSettings({ ...settings, discordActivityStyle: style });
-                        window.electronAPI?.setDiscordRpcActivityStyle?.(style);
+                        setSettings({ ...settings, discordActivityStyle: v });
+                        window.electronAPI?.setDiscordRpcActivityStyle?.(v);
                       }}
-                      options={[
-                        { value: 'media', label: 'Media Player (Timeline & Scrubber: ▶ 00:03 ━━ 03:29)' },
-                        { value: 'watching', label: 'Watching (Watching Kudflix)' },
-                        { value: 'playing', label: 'Playing (Playing mpv)' },
-                      ]}
+                      options={DISCORD_ACTIVITY_STYLE_OPTIONS}
                       buttonClassName="px-3 py-2 bg-black/70 border-gray-700 text-xs"
                       menuZIndex={450}
                     />
-                    <p className="text-[11px] text-gray-500 mt-1.5">
-                      Media Player style displays an active progress bar and thumbnail artwork on your Discord profile.
-                    </p>
-                  </div>
+                    <p className="text-xs text-gray-500">Sets your Discord status to show what you&apos;re watching.</p>
+                  </>
                 )}
               </div>
 
@@ -451,6 +481,20 @@ export function SettingsModal({ onClose, onSave, currentSettings, activeProfileI
                     <div key={folder} className="flex items-center gap-2 bg-black/50 border border-gray-700 rounded-lg px-3 py-2">
                       <FolderOpen className="w-4 h-4 text-gray-400 flex-shrink-0" />
                       <span className="text-sm text-gray-300 truncate flex-grow" title={folder}>{folder}</span>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={(settings.tvParentFolders ?? []).includes(folder)}
+                        onClick={() => toggleTvParentFolder(folder)}
+                        className={`text-[11px] font-bold px-2 py-1 rounded border shrink-0 transition ${
+                          (settings.tvParentFolders ?? []).includes(folder)
+                            ? 'border-accent bg-accent text-white'
+                            : 'border-gray-600 text-gray-400 hover:text-white hover:border-gray-400'
+                        }`}
+                        title="Treat this folder as a container: series are the folders inside it"
+                      >
+                        Parent folder
+                      </button>
                       <button onClick={() => removeFolder('tv', folder)} className="text-gray-500 hover:text-red-400 transition flex-shrink-0">
                         <Trash2 className="w-4 h-4" />
                       </button>

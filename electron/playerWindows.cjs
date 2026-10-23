@@ -1,4 +1,5 @@
 const { BrowserWindow } = require('electron');
+const { setWindowAbove } = require('./winZOrder.cjs');
 
 // Height of the strip left uncovered so the main window's drag region and
 // caption buttons (titleBarOverlay) stay usable during playback.
@@ -38,6 +39,11 @@ function playerWindowTitle(appName) {
  * setIgnoreMouseEvents(), which adds WS_EX_TRANSPARENT | WS_EX_LAYERED and
  * marks it as a click-through overlay that pickers skip. Taking no `parent`
  * costs automatic z-order above mainWindow, which handleMainFocus restores.
+ *
+ * Z-order vs other apps (windowed): the player is NOT globally always-on-top.
+ * On Windows, SetWindowPos places the player HWND directly above mainWindow so
+ * other apps can cover the player when focused. Fullscreen playback still uses
+ * a stronger always-on-top level to avoid the taskbar/refocus glitches.
  */
 class PlayerWindows {
   constructor(mainWindow, { isDev, preloadPath, indexHtmlPath }) {
@@ -52,6 +58,33 @@ class PlayerWindows {
     this.handleRestore = this.handleRestore.bind(this);
     this.handleMainFocus = this.handleMainFocus.bind(this);
     this.handlePlayerBlur = this.handlePlayerBlur.bind(this);
+    this.handleLeaveFullscreen = this.handleLeaveFullscreen.bind(this);
+    this.handleWindowPlacementChange = this.handleWindowPlacementChange.bind(this);
+    this.scheduleRestoreStack = this.scheduleRestoreStack.bind(this);
+  }
+
+  /** Windows reorders HWNDs when leaving fullscreen; retry until player sits above main again. */
+  scheduleRestoreStack() {
+    if (!this.isOpen()) return;
+    const run = () => this.restorePlayerStack();
+    run();
+    setImmediate(run);
+    setTimeout(run, 0);
+    setTimeout(run, 50);
+    setTimeout(() => {
+      run();
+      if (!this.isOpen() || this.mainWindow.isDestroyed()) return;
+      if (!this.isFullscreenPlayback()) {
+        this.playerWindow.show();
+        this.raisePlayerAboveMain();
+        this.playerWindow.focus();
+      }
+    }, 150);
+  }
+
+  handleLeaveFullscreen() {
+    if (!this.isOpen()) return;
+    this.scheduleRestoreStack();
   }
 
   isOpen() {
@@ -69,21 +102,53 @@ class PlayerWindows {
     };
   }
 
-  raisePlayerAboveMain() {
-    if (!this.isOpen()) return;
-    // Window is owned by mainWindow so OS maintains proper relative z-order
+  isFullscreenPlayback() {
+    if (!this.isOpen() || this.mainWindow.isDestroyed()) return false;
+    return this.mainWindow.isFullScreen() || this.playerWindow.isFullScreen();
   }
 
-  /** Re-stack player when main window gains focus. */
+  syncAlwaysOnTopLevel() {
+    if (!this.isOpen()) return;
+    if (this.isFullscreenPlayback()) {
+      // Stronger level in fullscreen so refocusing the library window (taskbar click,
+      // alt-tab) does not paint it over the player HWND on Windows.
+      this.playerWindow.setAlwaysOnTop(true, 'screen-saver');
+      return;
+    }
+    this.playerWindow.setAlwaysOnTop(false);
+  }
+
+  raisePlayerAboveMain() {
+    if (!this.isOpen() || this.mainWindow.isDestroyed()) return;
+    this.syncAlwaysOnTopLevel();
+    if (this.isFullscreenPlayback()) {
+      this.playerWindow.moveTop();
+      return;
+    }
+    const stacked = setWindowAbove(this.playerWindow, this.mainWindow);
+    if (!stacked) {
+      // Non-Windows or SetWindowPos unavailable: fall back to previous global top behavior.
+      this.playerWindow.setAlwaysOnTop(true, 'floating');
+      this.playerWindow.moveTop();
+    }
+  }
+
+  /** Re-stack player after main window steals focus (common when re-activating the app). */
   restorePlayerStack() {
     if (!this.isOpen() || this.mainWindow.isDestroyed()) return;
     this.syncBounds();
-    this.playerWindow.focus();
+    this.raisePlayerAboveMain();
+    if (this.mainWindow.isFullScreen()) {
+      this.playerWindow.focus();
+    }
   }
 
   applyPlayerFullscreen(isFullscreen) {
     if (!this.isOpen()) return;
     if (isFullscreen) {
+      // The player window receives focus when pausing/scrubbing. If only mainWindow
+      // is fullscreen, Windows treats the focused player as windowed and shows the
+      // taskbar, so both windows must enter fullscreen together.
       if (!this.playerWindow.isFullScreen()) {
         this.playerWindow.setFullScreen(true);
       }
@@ -93,6 +158,9 @@ class PlayerWindows {
     } else {
       this.playerWindow.setBounds(this.getTargetBounds());
     }
+    this.syncAlwaysOnTopLevel();
+    if (!this.playerWindow.isVisible()) this.playerWindow.show();
+    this.raisePlayerAboveMain();
     this.playerWindow.webContents.send('player-fullscreen', isFullscreen);
   }
 
@@ -106,19 +174,40 @@ class PlayerWindows {
   }
 
   handleRestore() {
-    if (!this.isOpen()) return;
-    this.syncBounds();
-    this.playerWindow.show();
-    this.playerWindow.focus();
+    this.handleWindowPlacementChange();
   }
 
+  /** Maximize, restore from taskbar, unmaximize — resync bounds and restack player above main. */
+  handleWindowPlacementChange() {
+    if (!this.isOpen()) return;
+    if (this.mainWindow.isDestroyed()) return;
+    if (this.mainWindow.isMinimized()) {
+      this.playerWindow?.hide();
+      return;
+    }
+    this.syncBounds();
+    if (!this.playerWindow.isDestroyed()) {
+      this.playerWindow.show();
+    }
+    this.scheduleRestoreStack();
+  }
+
+  /**
+   * Without an owner relationship, raising mainWindow (clicking its title strip,
+   * alt-tabbing to it) would bury the player behind the library UI.
+   */
   handleMainFocus() {
     if (!this.isOpen()) return;
     this.restorePlayerStack();
+    // Focus lands on main first when clicking the taskbar; defer so we run after WM finishes.
+    setImmediate(() => this.restorePlayerStack());
   }
 
   handlePlayerBlur() {
-    // Do not force focus back when user switches to other applications
+    if (!this.isOpen() || this.mainWindow.isDestroyed()) return;
+    if (this.mainWindow.isFocused()) {
+      setImmediate(() => this.scheduleRestoreStack());
+    }
   }
 
   open(options = {}) {
@@ -131,8 +220,8 @@ class PlayerWindows {
 
     this.playerWindow = new BrowserWindow({
       ...this.getTargetBounds(),
-      parent: this.mainWindow,
-      modal: false,
+      // No `parent`: an owned window is filtered out of share pickers and
+      // Windows refuses it a taskbar button.
       title,
       frame: false,
       transparent: true,
@@ -141,8 +230,9 @@ class PlayerWindows {
       minimizable: false,
       maximizable: false,
       fullscreenable: true,
+      // focusable: false would force skipTaskbar on, hiding it from pickers.
       focusable: true,
-      skipTaskbar: true,
+      skipTaskbar: false,
       show: false,
       hasShadow: false,
       backgroundColor: '#00000000',
@@ -165,6 +255,8 @@ class PlayerWindows {
     }
     this.playerWindow.setTitle(title);
 
+    this.syncAlwaysOnTopLevel();
+
     this.playerWindow.once('ready-to-show', () => {
       if (!this.isOpen()) return;
       this.syncBounds();
@@ -175,6 +267,9 @@ class PlayerWindows {
     });
 
     this.playerWindow.on('blur', this.handlePlayerBlur);
+    this.playerWindow.on('leave-full-screen', this.handleLeaveFullscreen);
+
+    this.mainWindow.on('leave-full-screen', this.handleLeaveFullscreen);
 
     this.playerWindow.on('closed', () => {
       this.playerWindow = null;
@@ -185,10 +280,10 @@ class PlayerWindows {
     this.mainWindow.on('move', this.syncBounds);
     this.mainWindow.on('enter-full-screen', this.syncBounds);
     this.mainWindow.on('leave-full-screen', this.syncBounds);
-    this.mainWindow.on('maximize', this.syncBounds);
-    this.mainWindow.on('unmaximize', this.syncBounds);
+    this.mainWindow.on('maximize', this.handleWindowPlacementChange);
+    this.mainWindow.on('unmaximize', this.handleWindowPlacementChange);
     this.mainWindow.on('minimize', this.handleMinimize);
-    this.mainWindow.on('restore', this.handleRestore);
+    this.mainWindow.on('restore', this.handleWindowPlacementChange);
     this.mainWindow.on('focus', this.handleMainFocus);
     this.mainWindow.on('show', this.handleMainFocus);
   }
@@ -221,12 +316,13 @@ class PlayerWindows {
       this.mainWindow.removeListener('move', this.syncBounds);
       this.mainWindow.removeListener('enter-full-screen', this.syncBounds);
       this.mainWindow.removeListener('leave-full-screen', this.syncBounds);
-      this.mainWindow.removeListener('maximize', this.syncBounds);
-      this.mainWindow.removeListener('unmaximize', this.syncBounds);
+      this.mainWindow.removeListener('maximize', this.handleWindowPlacementChange);
+      this.mainWindow.removeListener('unmaximize', this.handleWindowPlacementChange);
       this.mainWindow.removeListener('minimize', this.handleMinimize);
-      this.mainWindow.removeListener('restore', this.handleRestore);
+      this.mainWindow.removeListener('restore', this.handleWindowPlacementChange);
       this.mainWindow.removeListener('focus', this.handleMainFocus);
       this.mainWindow.removeListener('show', this.handleMainFocus);
+      this.mainWindow.removeListener('leave-full-screen', this.handleLeaveFullscreen);
       if (this.mainWindow.isFullScreen()) this.mainWindow.setFullScreen(false);
     }
 
@@ -235,6 +331,8 @@ class PlayerWindows {
     if (player && !player.isDestroyed()) {
       if (player.isFullScreen()) player.setFullScreen(false);
       player.removeListener('blur', this.handlePlayerBlur);
+      player.removeListener('leave-full-screen', this.handleLeaveFullscreen);
+      player.setAlwaysOnTop(false);
       player.removeAllListeners('closed');
       player.destroy();
     }

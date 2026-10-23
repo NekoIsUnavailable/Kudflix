@@ -21,6 +21,7 @@ import { resolveFileMeta } from './utils/metadata';
 import { getPlayerDisplayTitle } from './utils/displayTitle';
 import { getAdjacentEpisodes } from './utils/episodeNavigation';
 import { resolveEpisodeNumbers, parseEpisodeFromText } from './utils/episodeParsing';
+import { getShowSkipSettings } from './utils/showSkip';
 import { loadSettings, saveSettings } from './utils/settings';
 import { StartupScreen } from './components/StartupScreen';
 import { ProfilesScreen } from './components/ProfilesScreen';
@@ -35,6 +36,8 @@ import {
   buildHeroCatalog,
   buildGenreRows,
   getSeriesRoot,
+  getSeriesRootFromFile,
+  setTvParentFolders,
   resolvePlayTarget,
   resolveShowDetailTarget,
 } from './utils/grouping';
@@ -46,6 +49,7 @@ import {
   prefetchTMDBCatalog,
   prefetchTMDBDetailsCatalog,
   tmdbArtwork,
+  getCachedForVideo,
 } from './utils/tmdb';
 import { useTMDB } from './hooks/useTMDB';
 import { isTmdbDisabled } from './utils/mediaOverrides';
@@ -67,6 +71,24 @@ import { releaseVideoForPath } from './utils/thumbnail';
 import { appendWatchHistory, episodeCodeFromFile } from './utils/watchHistory';
 import { OnlineWatchView } from './components/OnlineWatchView';
 import kudLogo from './assets/logo.png';
+
+function WatchOnlineIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden>
+      <rect
+        x="2.5"
+        y="5.5"
+        width="19"
+        height="13"
+        rx="3.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.75"
+      />
+      <path d="M10 9.15v5.7L15.4 12 10 9.15z" fill="currentColor" />
+    </svg>
+  );
+}
 
 export default function App() {
   const [activeProfile, setActiveProfile] = useState<string | null>(null);
@@ -232,12 +254,17 @@ export default function App() {
     }
 
     saveSettings(settings);
+    setTvParentFolders(settings.tvParentFolders);
     window.electronAPI?.setAppIcon?.('default');
     window.electronAPI?.setDiscordRpcEnabled?.(settings.discordRpcEnabled ?? true);
-    if (settings.discordActivityStyle) {
-      window.electronAPI?.setDiscordRpcActivityStyle?.(settings.discordActivityStyle);
-    }
+    window.electronAPI?.setDiscordRpcActivityStyle?.(settings.discordActivityStyle ?? 'watching');
   }, [settings]);
+
+  useEffect(() => {
+    if (settings.watchOnlineNav === 'hidden' && activeTab === 'online') {
+      setActiveTab('home');
+    }
+  }, [settings.watchOnlineNav, activeTab]);
 
   useEffect(() => {
     window.electronAPI?.updateLibraryWatch?.([
@@ -444,31 +471,34 @@ export default function App() {
     return undefined;
   };
 
-  const buildSession = (video: LocalFile): PlayerSession | null => {
+  const buildSession = (video: LocalFile, opts?: { startAt?: 'progress' | 'beginning' }): PlayerSession | null => {
     if (!activeProfile) return null;
     const progress = JSON.parse(localStorage.getItem(`netflix_progress_${activeProfile}`) || '{}');
-    let startTime = progress[video.path] || 0;
+    let startTime = opts?.startAt === 'beginning' ? 0 : (progress[video.path] || 0);
     // Restart finished items from the beginning
     if (video.duration && startTime > video.duration - 30) startTime = 0;
     const allKnown = filesRef.current.length > 0 ? filesRef.current : files;
     const { prev, next } = getAdjacentEpisodes(allKnown, video);
+    const { outroSkipSeconds } = getShowSkipSettings(video);
 
-    const resolveOnlineImage = (target?: LocalFile): string | undefined => {
-      if (!target) return undefined;
-      const candidates = [target.thumbnail, target.meta?.poster];
-      for (const c of candidates) {
-        if (typeof c === 'string' && /^https?:\/\//i.test(c)) {
-          return c;
-        }
+    const httpsArt = (...urls: (string | null | undefined)[]): string | undefined => {
+      for (const c of urls) {
+        if (typeof c === 'string' && /^https?:\/\//i.test(c)) return c;
       }
       return undefined;
     };
 
+    const resolveOnlineImage = (target?: LocalFile): string | undefined => {
+      if (!target) return undefined;
+      const cached = getCachedForVideo(target);
+      const art = tmdbArtwork(cached, target);
+      return httpsArt(cached?.poster, cached?.backdrop, art, target.meta?.poster, target.thumbnail);
+    };
+
     let onlineThumbnail = resolveOnlineImage(video);
 
-    // If it's an episode or nested item without its own online artwork, resolve from parent show or overrides
     if (!onlineThumbnail) {
-      const root = getSeriesRoot(video.relativePath);
+      const root = getSeriesRootFromFile(video) || getSeriesRoot(video.relativePath);
       if (root) {
         const parent = allKnown.find(
           (f) => f.isFolder && (f.relativePath === root || f.folderName === root || f.path === `folder://${root}`)
@@ -484,6 +514,7 @@ export default function App() {
       thumbnail: onlineThumbnail,
       profileId: activeProfile,
       startTime,
+      outroSkipSeconds: outroSkipSeconds > 0 ? outroSkipSeconds : undefined,
       prev: prev
         ? {
             path: prev.path,
@@ -504,7 +535,7 @@ export default function App() {
     };
   };
 
-  const handlePlayVideo = (video: LocalFile) => {
+  const handlePlayVideo = (video: LocalFile, opts?: { startAt?: 'progress' | 'beginning' }) => {
     const target = resolvePlayTarget(video);
     if (activeProfile) {
       const counts = JSON.parse(localStorage.getItem(`netflix_playcounts_${activeProfile}`) || '{}');
@@ -514,7 +545,7 @@ export default function App() {
 
     if (settings.useExternalPlayer && playInExternal(target)) return;
 
-    const session = buildSession(target);
+    const session = buildSession(target, opts);
     if (!session || !window.electronAPI?.playerStart) return;
     playingVideoRef.current = target;
     setPlayingVideo(target);
@@ -612,11 +643,11 @@ export default function App() {
       const currentPlaying = playingVideoRef.current;
 
       if (matched && (!currentPlaying || norm(matched.path) !== norm(currentPlaying.path))) {
-        play(matched);
+        play(matched, { startAt: 'beginning' });
       } else {
         const reference = matched || currentPlaying;
         const { next } = getAdjacentEpisodes(allKnown, reference ?? null);
-        if (next) play(next);
+        if (next) play(next, { startAt: 'beginning' });
       }
     });
 
@@ -628,11 +659,11 @@ export default function App() {
       const currentPlaying = playingVideoRef.current;
 
       if (matched && (!currentPlaying || norm(matched.path) !== norm(currentPlaying.path))) {
-        play(matched);
+        play(matched, { startAt: 'beginning' });
       } else {
         const reference = matched || currentPlaying;
         const { prev } = getAdjacentEpisodes(allKnown, reference ?? null);
-        if (prev) play(prev);
+        if (prev) play(prev, { startAt: 'beginning' });
       }
     });
 
@@ -687,7 +718,7 @@ export default function App() {
       searchCatalog,
       heroCatalog,
     };
-  }, [files, progresses, activeProfile, overrideTick, tmdbCacheTick]);
+  }, [files, progresses, activeProfile, overrideTick, tmdbCacheTick, settings.tvParentFolders]);
 
   const { movieListRows, tvListRows } = useMemo(() => {
     const movieCatalog = movies;
@@ -830,11 +861,32 @@ export default function App() {
                   <img src={kudLogo} alt="Logo" className="w-7 h-7 rounded-md object-cover shadow-sm drop-shadow-md" />
                   <h1 className="text-accent font-black text-2xl tracking-tighter shadow-black drop-shadow-md">{settings.appName}</h1>
                 </div>
-                <ul className="hidden md:flex gap-5 text-sm font-semibold text-gray-200 pointer-events-auto">
+                <ul className="hidden md:flex items-center gap-5 text-sm font-semibold text-gray-200 pointer-events-auto">
                   <li onClick={() => { setShowSearch(false); setShowHistory(false); setActiveTab('home'); }} className={`drop-shadow-md cursor-pointer transition ${activeTab === 'home' && !showSearch && !showHistory ? 'text-white' : 'hover:text-gray-300'}`}>Home</li>
                   <li onClick={() => { setShowSearch(false); setShowHistory(false); setActiveTab('tv'); }} className={`drop-shadow-md cursor-pointer transition ${activeTab === 'tv' && !showSearch && !showHistory ? 'text-white' : 'hover:text-gray-300'}`}>TV Shows</li>
                   <li onClick={() => { setShowSearch(false); setShowHistory(false); setActiveTab('movies'); }} className={`drop-shadow-md cursor-pointer transition ${activeTab === 'movies' && !showSearch && !showHistory ? 'text-white' : 'hover:text-gray-300'}`}>Movies</li>
-                  <li onClick={() => { setShowSearch(false); setShowHistory(false); setActiveTab('online'); }} className={`drop-shadow-md cursor-pointer transition ${activeTab === 'online' && !showSearch && !showHistory ? 'text-white' : 'hover:text-gray-300'}`}>Watch Online</li>
+                  {settings.watchOnlineNav !== 'hidden' && (
+                    <li>
+                      {settings.watchOnlineNav === 'icon' ? (
+                        <button
+                          type="button"
+                          onClick={() => { setShowSearch(false); setShowHistory(false); setActiveTab('online'); }}
+                          className={`flex items-center p-0.5 rounded-md transition ${activeTab === 'online' && !showSearch && !showHistory ? 'text-white' : 'text-gray-200 hover:text-gray-300'}`}
+                          aria-label="Watch Online"
+                          title="Watch Online"
+                        >
+                          <WatchOnlineIcon className="w-5 h-5" />
+                        </button>
+                      ) : (
+                        <span
+                          onClick={() => { setShowSearch(false); setShowHistory(false); setActiveTab('online'); }}
+                          className={`drop-shadow-md cursor-pointer transition ${activeTab === 'online' && !showSearch && !showHistory ? 'text-white' : 'hover:text-gray-300'}`}
+                        >
+                          Watch Online
+                        </span>
+                      )}
+                    </li>
+                  )}
                 </ul>
               </div>
             
@@ -1114,6 +1166,7 @@ export default function App() {
                 onInfo={handleOpenInfo}
                 progresses={progresses}
                 expandable
+                mediaType="movie"
                 activeProfileId={activeProfile}
                 watchedIndicatorMode={settings.watchedIndicatorMode}
               />
@@ -1128,6 +1181,7 @@ export default function App() {
                 onInfo={handleOpenInfo}
                 progresses={progresses}
                 expandable
+                mediaType="tv"
                 activeProfileId={activeProfile}
                 watchedIndicatorMode={settings.watchedIndicatorMode}
               />
@@ -1183,7 +1237,7 @@ export default function App() {
               style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
               className="ml-4 shrink-0 text-white/70 hover:text-white px-2 py-0.5 rounded hover:bg-white/10 text-xs transition cursor-pointer"
             >
-              ← Back to Browse
+              ← Back
             </button>
           </div>
         </div>
@@ -1201,6 +1255,9 @@ export default function App() {
           progresses={progresses}
           activeProfileId={activeProfile}
           watchedIndicatorMode={settings.watchedIndicatorMode}
+          initialMediaType={
+            activeTab === 'movies' ? 'movie' : activeTab === 'tv' ? 'tv' : 'all'
+          }
         />
       )}
 

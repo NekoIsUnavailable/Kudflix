@@ -8,48 +8,132 @@ function normPath(p: string): string {
   return p.replace(/\//g, '\\').toLowerCase();
 }
 
+function normFolderPath(p: string): string {
+  return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+function pathBasename(p: string): string {
+  const n = p.replace(/\\/g, '/').replace(/\/+$/, '');
+  const i = n.lastIndexOf('/');
+  return i >= 0 ? n.slice(i + 1) : n;
+}
+
+let parentFolderPaths: string[] = [];
+let parentFolderBasenames = new Set<string>();
+
+/** Mark TV library folders whose children (not the folder itself) are series. */
+export function setTvParentFolders(paths: string[] | undefined): void {
+  parentFolderPaths = (paths ?? []).map(normFolderPath).filter(Boolean);
+  parentFolderBasenames = new Set(parentFolderPaths.map((p) => pathBasename(p).toLowerCase()));
+}
+
+function isParentFolderName(name: string): boolean {
+  return parentFolderBasenames.has(name.toLowerCase());
+}
+
+function isUnderMarkedParentPath(filePath?: string): boolean {
+  if (!filePath || parentFolderPaths.length === 0) return false;
+  const n = normFolderPath(filePath);
+  return parentFolderPaths.some((parent) => n === parent || n.startsWith(`${parent}/`));
+}
+
+function lastNonSeasonIndex(dirs: string[]): number {
+  let i = dirs.length - 1;
+  while (i >= 0 && isSeasonFolderName(dirs[i])) i -= 1;
+  return i;
+}
+
+/** Skip marked parent folders so the show is the child directory. */
+function skipParentFolders(dirs: string[], startIndex: number): number | null {
+  let i = startIndex;
+  if (i < 0) return null;
+  while (i < dirs.length && isParentFolderName(dirs[i])) {
+    const next = i + 1;
+    if (next < dirs.length && !isSeasonFolderName(dirs[next])) {
+      i = next;
+      continue;
+    }
+    return null;
+  }
+  return i;
+}
+
+function seriesRootFromDirSegments(dirs: string[]): string | null {
+  const idx = skipParentFolders(dirs, lastNonSeasonIndex(dirs));
+  if (idx == null || idx < 0) return null;
+  return dirs[idx] ?? null;
+}
+
 const JUNK_GENRES = new Set(['Local Media', 'Movie', 'Series', '']);
 
 export function getSeriesRoot(relativePath?: string): string | null {
   if (!relativePath) return null;
   const parts = relativePath.replace(/\\/g, '/').split('/').filter(Boolean);
   if (parts.length === 0) return null;
-  if (parts.length === 1) return parts[0];
-  if (isSeasonFolderName(parts[0]) && parts.length > 1) {
-    return null;
-  }
-  return parts[0];
+  const dirs = parts.length === 1 ? parts : parts.slice(0, -1);
+  if (dirs.length === 0) return parts[0];
+  return seriesRootFromDirSegments(dirs);
 }
 
-export function getSeriesRootFromFile(f: LocalFile): string | null {
-  // 1. Try relativePath segments
+export function getSeriesRootFromFile(f: Pick<LocalFile, 'path' | 'relativePath' | 'folderName'>): string | null {
   if (f.relativePath) {
     const fromRel = getSeriesRoot(f.relativePath);
     if (fromRel) return fromRel;
   }
 
-  // 2. Derive from physical path
   if (f.path) {
-    const normalized = f.path.replace(/\\/g, '/');
-    const segs = normalized.split('/').filter(Boolean);
+    const segs = f.path.replace(/\\/g, '/').split('/').filter(Boolean);
     if (segs.length >= 2) {
-      const parent = segs[segs.length - 2];
-      if (isSeasonFolderName(parent)) {
-        if (segs.length >= 3) {
-          return segs[segs.length - 3];
-        }
-      } else {
-        return parent;
+      const dirs = segs.slice(0, -1);
+      const fromPath = seriesRootFromDirSegments(dirs);
+      if (fromPath && !(isParentFolderName(fromPath) && isUnderMarkedParentPath(f.path))) {
+        return fromPath;
       }
     }
   }
 
-  // 3. Fallback to folderName if available and not a season folder
-  if (f.folderName && !isSeasonFolderName(f.folderName)) {
+  if (f.folderName && !isSeasonFolderName(f.folderName) && !isParentFolderName(f.folderName)) {
     return f.folderName;
   }
 
   return null;
+}
+
+function childShowUnderRoot(relativePath: string | undefined, root: string): string | null {
+  if (!relativePath) return null;
+  const parts = relativePath.replace(/\\/g, '/').split('/').filter(Boolean);
+  const idx = parts.findIndex((p) => p.toLowerCase() === root.toLowerCase());
+  if (idx < 0 || idx >= parts.length - 2) return null;
+  const next = parts[idx + 1];
+  if (!next || isSeasonFolderName(next)) return null;
+  return next;
+}
+
+/** If a "show" folder actually contains multiple series dirs, split by those children. */
+function splitContainerGroups(rootFolders: Map<string, LocalFile[]>): Map<string, LocalFile[]> {
+  const next = new Map<string, LocalFile[]>();
+
+  for (const [root, list] of rootFolders) {
+    const childCounts = new Map<string, number>();
+    for (const f of list) {
+      const child = childShowUnderRoot(f.relativePath, root);
+      if (child) childCounts.set(child, (childCounts.get(child) ?? 0) + 1);
+    }
+    const childShows = [...childCounts.keys()];
+    if (childShows.length < 2) {
+      next.set(root, [...(next.get(root) ?? []), ...list]);
+      continue;
+    }
+
+    for (const f of list) {
+      const child = childShowUnderRoot(f.relativePath, root);
+      const key = child ?? root;
+      if (!next.has(key)) next.set(key, []);
+      next.get(key)!.push(f);
+    }
+  }
+
+  return next;
 }
 
 function bestThumbnail(episodes: LocalFile[]): string | undefined {
@@ -75,7 +159,9 @@ export function buildSeriesFolders(shows: LocalFile[]): LocalFile[] {
     rootFolders.get(root)!.push(f);
   });
 
-  return Array.from(rootFolders.entries()).map(([root, fList]) => {
+  const grouped = splitContainerGroups(rootFolders);
+
+  return Array.from(grouped.entries()).map(([root, fList]) => {
     const sorted = [...fList].sort((a, b) => {
       const epA = resolveEpisodeNumbers(a.name, a.relativePath);
       const epB = resolveEpisodeNumbers(b.name, b.relativePath);

@@ -4,7 +4,121 @@ import {
   Maximize, Minimize, SkipBack, SkipForward, Captions, Gauge,
 } from 'lucide-react';
 import { AudioSubtitlePanel, SpeedPanel } from './TrackMenu';
-import { formatTime, type SubtitleStyle } from '../utils/subtitles';
+import {
+  formatTime,
+  PLAYER_VOLUME_MAX,
+  PLAYER_VOLUME_REFERENCE,
+  snapPlayerVolume,
+  type SubtitleStyle,
+} from '../utils/subtitles';
+
+/** Two-segment slider: white = 0–100%, amber = 100–150% boost zone. */
+function VolumeSlider({
+  value,
+  onChange,
+  onDraggingChange,
+}: {
+  value: number;
+  onChange: (n: number) => void;
+  onDraggingChange?: (dragging: boolean) => void;
+}) {
+  const prevRef = useRef(value);
+  const [dragging, setDragging] = useState(false);
+  const splitPct = (PLAYER_VOLUME_REFERENCE / PLAYER_VOLUME_MAX) * 100;
+  const fillPct = (value / PLAYER_VOLUME_MAX) * 100;
+  const normalFillPct = Math.min(fillPct, splitPct);
+  const boostFillPct = fillPct > splitPct ? fillPct - splitPct : 0;
+  const boosted = value > PLAYER_VOLUME_REFERENCE;
+
+  useEffect(() => {
+    prevRef.current = value;
+  }, [value]);
+
+  const setDraggingState = (next: boolean) => {
+    setDragging(next);
+    onDraggingChange?.(next);
+  };
+
+  const handleChange = (raw: number) => {
+    const prev = prevRef.current;
+    const next = snapPlayerVolume(raw, prev);
+    prevRef.current = next;
+    onChange(next);
+  };
+
+  return (
+    <div
+      className="flex items-center gap-2 shrink-0 ml-1"
+      title={boosted ? `Volume ${value}% (boosted)` : `Volume ${value}%`}
+    >
+      <div className="relative w-[7.5rem] h-5 flex items-center shrink-0">
+      <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-1 rounded-full overflow-hidden flex pointer-events-none">
+        <div className="h-full bg-white/25" style={{ width: `${splitPct}%` }} />
+        <div
+          className="h-full bg-amber-500/25 border-l border-amber-400/40"
+          style={{ width: `${100 - splitPct}%` }}
+        />
+      </div>
+      <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-1 rounded-full overflow-hidden pointer-events-none">
+        <div className="absolute left-0 top-0 h-full bg-white rounded-l-full" style={{ width: `${normalFillPct}%` }} />
+        {boostFillPct > 0 && (
+          <div
+            className="absolute top-0 h-full bg-amber-400 rounded-r-full"
+            style={{ left: `${splitPct}%`, width: `${boostFillPct}%` }}
+          />
+        )}
+      </div>
+      <div
+        className="absolute top-1/2 -translate-y-1/2 h-3 w-px bg-white/35 pointer-events-none"
+        style={{ left: `${splitPct}%` }}
+        aria-hidden
+      />
+      <input
+        type="range"
+        min={0}
+        max={PLAYER_VOLUME_MAX}
+        value={value}
+        onChange={(e) => handleChange(Number(e.target.value))}
+        onInput={(e) => handleChange(Number((e.target as HTMLInputElement).value))}
+        onPointerDown={(e) => {
+          setDraggingState(true);
+          e.currentTarget.setPointerCapture(e.pointerId);
+        }}
+        onPointerUp={(e) => {
+          setDraggingState(false);
+          if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+            e.currentTarget.releasePointerCapture(e.pointerId);
+          }
+        }}
+        onPointerCancel={(e) => {
+          setDraggingState(false);
+          if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+            e.currentTarget.releasePointerCapture(e.pointerId);
+          }
+        }}
+        onBlur={() => setDraggingState(false)}
+        className="player-volume-range absolute inset-0 w-full cursor-pointer"
+        aria-label="Volume"
+        aria-valuetext={boosted ? `${value} percent, boosted` : `${value} percent`}
+      />
+      </div>
+      <div
+        className={`shrink-0 transition-opacity duration-150 ${
+          dragging ? 'opacity-100' : 'opacity-0 w-0 overflow-hidden pointer-events-none'
+        }`}
+        aria-hidden={!dragging}
+      >
+        <span
+          className={`inline-flex items-center justify-center min-w-[2.5rem] px-1.5 py-0.5 rounded text-[11px] leading-tight font-bold tabular-nums shadow-md ${
+            boosted ? 'bg-amber-500/90 text-black' : 'bg-white/95 text-black'
+          }`}
+        >
+          {value}%
+        </span>
+      </div>
+    </div>
+  );
+}
 
 export type PlayerPanel = 'tracks' | 'speed' | null;
 
@@ -35,6 +149,7 @@ function ProgressBar({ timePos, duration, playing, speed, onSeek, onScrubbingCha
   const fillRef = useRef<HTMLDivElement>(null);
   const thumbRef = useRef<HTMLDivElement>(null);
   const remainingRef = useRef<HTMLSpanElement>(null);
+  const currentRef = useRef<HTMLSpanElement>(null);
   const base = useRef({ time: timePos, at: performance.now() });
   const pendingSeek = useRef<{ time: number; until: number } | null>(null);
   const [scrubTime, setScrubTime] = useState<number | null>(null);
@@ -68,6 +183,7 @@ function ProgressBar({ timePos, duration, playing, speed, onSeek, onScrubbingCha
       if (fillRef.current) fillRef.current.style.width = `${pct}%`;
       if (thumbRef.current) thumbRef.current.style.left = `${pct}%`;
       if (remainingRef.current) remainingRef.current.textContent = formatTime(Math.max(0, duration - t));
+      if (currentRef.current) currentRef.current.textContent = formatTime(Math.max(0, t));
       frame = requestAnimationFrame(render);
     };
     frame = requestAnimationFrame(render);
@@ -113,6 +229,9 @@ function ProgressBar({ timePos, duration, playing, speed, onSeek, onScrubbingCha
 
   return (
     <div className="flex items-center gap-4">
+      <span ref={currentRef} className="text-white text-sm font-medium tabular-nums min-w-[3.5rem] text-left">
+        {formatTime(Math.max(0, timePos))}
+      </span>
       <div
         ref={trackRef}
         className="group/bar relative flex-1 h-5 flex items-center cursor-pointer touch-none"
@@ -220,6 +339,7 @@ export function PlayerControls(props: PlayerControlsProps) {
   } = props;
 
   const effectiveVolume = muted ? 0 : volume;
+  const [volumeDragging, setVolumeDragging] = useState(false);
   const VolumeIcon = effectiveVolume === 0 ? VolumeX : effectiveVolume < 50 ? Volume1 : Volume2;
   const togglePanel = (panel: Exclude<PlayerPanel, null>) => onPanelChange(openPanel === panel ? null : panel);
   const closePanel = () => onPanelChange(null);
@@ -241,7 +361,7 @@ export function PlayerControls(props: PlayerControlsProps) {
       <div className="absolute top-0 left-0 p-6 md:px-10 pointer-events-auto" onClick={stop} onDoubleClick={stop}>
         <button
           onClick={onBack}
-          aria-label="Back to browse"
+          aria-label="Back"
           className="text-white transition-transform duration-150 hover:scale-125"
         >
           <ArrowLeft className="w-10 h-10" strokeWidth={2} />
@@ -271,25 +391,26 @@ export function PlayerControls(props: PlayerControlsProps) {
             <SkipIcon direction="forward" />
           </IconButton>
 
-          <div className="group/vol flex items-center">
+          <div className="group/vol relative shrink-0">
             <IconButton label={muted ? 'Unmute (M)' : 'Mute (M)'} onClick={onMute}>
               <VolumeIcon className="w-9 h-9" />
             </IconButton>
-            <div className="w-0 overflow-hidden group-hover/vol:w-28 transition-[width] duration-200">
-              <input
-                type="range"
-                min={0}
-                max={100}
+            <div
+              className={`absolute left-[calc(100%+2px)] top-1/2 -translate-y-1/2 z-30 transition-opacity duration-200 ${
+                volumeDragging
+                  ? 'opacity-100 pointer-events-auto'
+                  : 'opacity-0 pointer-events-none group-hover/vol:opacity-100 group-hover/vol:pointer-events-auto'
+              }`}
+            >
+              <VolumeSlider
                 value={effectiveVolume}
-                onChange={(e) => onVolumeChange(Number(e.target.value))}
-                className="player-range w-24 ml-2"
-                style={{ '--fill': `${effectiveVolume}%` } as React.CSSProperties}
-                aria-label="Volume"
+                onChange={onVolumeChange}
+                onDraggingChange={setVolumeDragging}
               />
             </div>
           </div>
 
-          <div className="flex-1 min-w-0 text-center px-4 truncate">
+          <div className="flex-1 min-w-0 text-center px-4 truncate pointer-events-none">
             <span className="text-white text-lg font-bold">{title}</span>
             {subtitle && <span className="text-white/70 text-lg ml-3">{subtitle}</span>}
           </div>

@@ -91,6 +91,28 @@ export function hasUnwatchedEpisode(
   return !isSeriesWatched(folder, progresses, profileId);
 }
 
+export type GridWatchedFilter = 'all' | 'unwatched' | 'watched';
+
+/** Watched/unwatched filter for grid modals (movies, series folders, or mixed rows). */
+export function matchesGridWatchedFilter(
+  video: LocalFile,
+  filter: GridWatchedFilter,
+  progresses: Record<string, number>,
+  profileId: string,
+  mediaType?: 'movie' | 'tv',
+): boolean {
+  if (filter === 'all') return true;
+
+  const asTv = mediaType === 'tv' || (mediaType !== 'movie' && video.isFolder);
+  if (asTv && video.isFolder) {
+    if (filter === 'watched') return isSeriesWatched(video, progresses, profileId);
+    return hasUnwatchedEpisode(video, progresses, profileId);
+  }
+
+  const w = isWatched(video, progresses, profileId);
+  return filter === 'watched' ? w : !w;
+}
+
 export function hasPartialProgress(
   path: string,
   duration: number | undefined,

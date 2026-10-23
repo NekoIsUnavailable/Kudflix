@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Play, ChevronLeft, ChevronRight, X, Edit2, Save, Shuffle, FolderOpen, Eye, EyeOff, MoreVertical, BookmarkPlus } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -18,6 +18,7 @@ import { enrichEpisodesBatch } from '../utils/libraryLoader';
 import { useTMDB } from '../hooks/useTMDB';
 import { useTMDBDetails } from '../hooks/useTMDBDetails';
 import { getMediaOverride, isTmdbDisabled, type MediaOverride } from '../utils/mediaOverrides';
+import { parseSkipSecondsField } from '../utils/showSkip';
 import { useImageBrightness } from '../hooks/useImageBrightness';
 import { EpisodeRow } from './EpisodeRow';
 import { WatchedEyeIndicator } from './WatchedEyeIndicator';
@@ -28,7 +29,7 @@ import {
   isWatched,
   isSeriesWatched,
   isSeasonWatched,
-  hasUnwatchedEpisode,
+  matchesGridWatchedFilter,
   setManualWatched,
   setSeriesWatched,
   setEpisodesWatched,
@@ -157,15 +158,10 @@ export function GridViewModal({
   const sortedVideos = useMemo(() => {
     let list = [...videos];
 
-    if (activeProfileId && mediaType && filter !== 'all') {
-      list = list.filter((v) => {
-        if (mediaType === 'movie') {
-          const w = isWatched(v, progresses, activeProfileId);
-          return filter === 'watched' ? w : !w;
-        }
-        if (filter === 'watched') return isSeriesWatched(v, progresses, activeProfileId);
-        return hasUnwatchedEpisode(v, progresses, activeProfileId);
-      });
+    if (activeProfileId && filter !== 'all') {
+      list = list.filter((v) =>
+        matchesGridWatchedFilter(v, filter, progresses, activeProfileId, mediaType),
+      );
     }
 
     if (!sortable) return list;
@@ -190,9 +186,8 @@ export function GridViewModal({
   }, [videos, sort, sortable, filter, activeProfileId, mediaType, progresses]);
 
   const playRandom = () => {
-    const movies = sortedVideos.filter((v) => !v.isFolder);
-    if (movies.length === 0) return;
-    const pick = movies[Math.floor(Math.random() * movies.length)];
+    if (sortedVideos.length === 0) return;
+    const pick = sortedVideos[Math.floor(Math.random() * sortedVideos.length)];
     onClose();
     onPlay(pick);
   };
@@ -228,7 +223,7 @@ export function GridViewModal({
             </button>
           </div>
 
-          {(sortable || showRandomPlay || (activeProfileId && mediaType)) && (
+          {(sortable || showRandomPlay || activeProfileId) && (
             <div className="flex items-center gap-4 px-10 pb-6 shrink-0 flex-wrap">
               {sortable && (
                 <ThemedSelect
@@ -240,7 +235,7 @@ export function GridViewModal({
                   menuZIndex={550}
                 />
               )}
-              {activeProfileId && mediaType && (
+              {activeProfileId && (
                 <ThemedSelect
                   value={filter}
                   onChange={setFilter}
@@ -365,6 +360,10 @@ export function DetailModal({
     anilistId: currentOverride?.anilistId ?? '',
     disableTmdb: currentOverride?.disableTmdb ?? false,
     useSeriesThumbnailForEpisodes: currentOverride?.useSeriesThumbnailForEpisodes ?? false,
+    outroSkipSeconds:
+      currentOverride?.outroSkipSeconds != null
+        ? String(currentOverride.outroSkipSeconds)
+        : '',
   });
   const [editError, setEditError] = useState<string | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
@@ -384,6 +383,8 @@ export function DetailModal({
       anilistId: ov?.anilistId ?? '',
       disableTmdb: ov?.disableTmdb ?? false,
       useSeriesThumbnailForEpisodes: ov?.useSeriesThumbnailForEpisodes ?? false,
+      outroSkipSeconds:
+        ov?.outroSkipSeconds != null ? String(ov.outroSkipSeconds) : '',
     });
     setEditError(null);
     setIsEditing(false);
@@ -415,6 +416,12 @@ export function DetailModal({
       return;
     }
     setEditError(null);
+    const outroParsed = video.isFolder ? parseSkipSecondsField(editForm.outroSkipSeconds) : undefined;
+    if (video.isFolder && editForm.outroSkipSeconds.trim() && outroParsed === undefined) {
+      setEditError('Outro skip must be a non-negative number of seconds.');
+      return;
+    }
+
     const override: MediaOverride = {
       title: editForm.title.trim() || undefined,
       description: editForm.description.trim() || undefined,
@@ -425,6 +432,7 @@ export function DetailModal({
       anilistId: trimmedAniListId,
       disableTmdb: editForm.disableTmdb,
       useSeriesThumbnailForEpisodes: video.isFolder ? editForm.useSeriesThumbnailForEpisodes : undefined,
+      outroSkipSeconds: video.isFolder ? outroParsed : undefined,
     };
     onUpdate?.(video.path, override);
     setIsEditing(false);
@@ -850,6 +858,23 @@ export function DetailModal({
                       </div>
                     )}
                   </div>
+                  {video.isFolder && (
+                    <div>
+                      <label className="text-xs font-semibold text-gray-500 block mb-1">Outro skip (seconds)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={editForm.outroSkipSeconds}
+                        onChange={(e) => setEditForm({ ...editForm, outroSkipSeconds: e.target.value })}
+                        placeholder="e.g. 60"
+                        className="w-full bg-black/50 border border-gray-600 rounded-lg px-4 py-2 text-white outline-none focus:border-white transition"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        Next Episode appears this many seconds before the end (default 20 if empty).
+                      </p>
+                    </div>
+                  )}
                   {editError && <p className="text-xs text-red-400">{editError}</p>}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <EditToggle
@@ -1103,6 +1128,7 @@ export function VideoCard({
   const [isHovered, setIsHovered] = useState(false);
   const [listPickerOpen, setListPickerOpen] = useState(false);
   const hoverTimeoutRef = useRef<number | null>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
   const useLocalOnly = isTmdbDisabled(video);
   const tmdb = useTMDB(video);
 
@@ -1131,10 +1157,19 @@ export function VideoCard({
     setIsHovered(false);
   };
 
+  // List popover is portaled; leaving the card for the menu skips mouseLeave collapse until close.
+  useLayoutEffect(() => {
+    if (listPickerOpen) return;
+    requestAnimationFrame(() => {
+      if (!cardRef.current?.matches(':hover')) setIsHovered(false);
+    });
+  }, [listPickerOpen]);
+
   const folderTotalRuntime = video.folderFiles?.reduce((sum, ep) => sum + (ep.duration ?? 0), 0) ?? 0;
 
   return (
     <div 
+      ref={cardRef}
       className={`relative rounded-md cursor-pointer transition-transform duration-300 ${isGrid ? 'w-full aspect-video' : 'flex-none w-64 aspect-video hover:z-50'}`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
@@ -1414,7 +1449,7 @@ export function ContentRow({
           onInfo={(v) => { setShowGrid(false); onInfo(v); }}
           progresses={progresses}
           sortable={expandable}
-          showRandomPlay={title === 'Movies'}
+          showRandomPlay={expandable}
           activeProfileId={activeProfileId}
           mediaType={mediaType}
           watchedIndicatorMode={watchedIndicatorMode}

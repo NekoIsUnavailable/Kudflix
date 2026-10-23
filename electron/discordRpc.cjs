@@ -13,7 +13,7 @@ class DiscordRpcManager {
     this.reconnectTimer = null;
     this.lastState = null;
     this.lastSession = null;
-    this.activityStyle = 'media'; // 'media' (type 2 - scrubber timeline), 'watching' (type 3), 'playing' (type 0)
+    this.activityStyle = 'watching'; // 'media' (type 2 - scrubber timeline), 'watching' (type 3), 'playing' (type 0)
   }
 
   init(clientId) {
@@ -123,26 +123,27 @@ class DiscordRpcManager {
 
     if (!this.enabled) return;
 
-    const title = session.title || 'Video';
-    const subtitle = session.subtitle || (session.isFolder ? 'TV Series' : 'Movie');
+    const clip = (value) => (value.length > 128 ? value.slice(0, 125) + '...' : value);
+    const title = clip(session.title || 'Video');
+    const subtitle = clip(session.subtitle || (session.isFolder ? 'TV Series' : 'Movie'));
     const isPaused = Boolean(state?.pause);
 
     // Pick large image: if session has an online thumbnail (http/https), Discord's media proxy will render it!
     const hasOnlineThumb = typeof session.thumbnail === 'string' && /^https?:\/\//i.test(session.thumbnail);
     const largeImage = hasOnlineThumb ? session.thumbnail : 'mpv';
 
-    let activityType = 2; // Type 2 (Listening) triggers Discord's media player scrubber bar (▶ 00:03 ━━━ 03:29)
-    if (this.activityStyle === 'watching') activityType = 3;
+    // Type 3 (Watching) and type 2 (Listening) both show a progress bar when start+end timestamps are set.
+    let activityType = 3;
+    if (this.activityStyle === 'media') activityType = 2;
     if (this.activityStyle === 'playing') activityType = 0;
 
     const activity = {
       type: activityType,
-      details: title.length > 128 ? title.slice(0, 125) + '...' : title,
+      name: title,
+      details: title,
       state: isPaused ? `${subtitle} (Paused)` : subtitle,
       largeImageKey: largeImage,
       largeImageText: title,
-      smallImageKey: isPaused ? 'pause' : 'play',
-      smallImageText: isPaused ? 'Paused' : 'Playing',
       instance: false,
     };
 
@@ -168,20 +169,19 @@ class DiscordRpcManager {
         end: activity.endTimestamp,
       } : undefined;
 
-      const assets = (activity.largeImageKey || activity.smallImageKey) ? {
+      const assets = activity.largeImageKey ? {
         large_image: activity.largeImageKey,
         large_text: activity.largeImageText,
-        small_image: activity.smallImageKey,
-        small_text: activity.smallImageText,
       } : undefined;
 
       // Send directly via request('SET_ACTIVITY') so activity.type is preserved
       this.client.request('SET_ACTIVITY', {
         pid,
         activity: {
-          type: typeof activity.type === 'number' ? activity.type : 2,
-          state: activity.state,
+          type: typeof activity.type === 'number' ? activity.type : 3,
+          name: activity.name || activity.details,
           details: activity.details,
+          state: activity.state,
           timestamps,
           assets,
           instance: false,

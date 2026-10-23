@@ -216,7 +216,7 @@ export function ProfilesScreen({
           <User className="w-5 h-5 text-accent flex-shrink-0" />
           <div className="flex-grow min-w-0">
             <span className="text-sm font-bold text-white block">Skip profile selection on startup</span>
-            <span className="text-xs text-gray-400">Tap a profile below to set the default</span>
+            <span className="text-xs text-gray-400">Select a profile below as the default to automatically be logged into on launch</span>
           </div>
           <input
             type="checkbox"

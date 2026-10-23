@@ -87,9 +87,9 @@ async function exitPlayer(payload) {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 720,
-    minWidth: 640,
+    width: 1440,
+    height: 810,
+    minWidth: 800,
     minHeight: 400,
     backgroundColor: '#141414',
     titleBarStyle: 'hidden',

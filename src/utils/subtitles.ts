@@ -24,6 +24,65 @@ const SUB_STYLE_KEY = 'kudflix_subtitle_style';
 const AUDIO_PREFS_KEY = 'kudflix_audio_prefs';
 const VOLUME_KEY = 'kudflix_player_volume';
 const MUTE_KEY = 'kudflix_player_muted';
+const VOLUME_BOOST_SESSION_KEY = 'kudflix_player_volume_boost_session';
+
+/** mpv volume above 100% requires --volume-max; UI shows a separate boost segment. */
+export const PLAYER_VOLUME_REFERENCE = 100;
+export const PLAYER_VOLUME_MAX = 150;
+
+export function clampPlayerVolume(value: number): number {
+  return Math.max(0, Math.min(PLAYER_VOLUME_MAX, Math.round(value)));
+}
+
+/** Snap range around 100% — wider band so the slider catches firmly at reference volume. */
+export const PLAYER_VOLUME_SNAP_RADIUS = 6;
+
+export function snapPlayerVolume(raw: number, prev: number): number {
+  const v = clampPlayerVolume(raw);
+  const ref = PLAYER_VOLUME_REFERENCE;
+  const r = PLAYER_VOLUME_SNAP_RADIUS;
+  const lo = ref - r;
+  const hi = ref + r;
+  const inDetent = v >= lo && v <= hi;
+
+  if (v === ref) return ref;
+
+  const enteringFromBelow = prev < lo && v >= lo;
+  const enteringFromAbove = prev > hi && v <= hi;
+  if (enteringFromBelow || enteringFromAbove) return ref;
+
+  if (prev > ref && inDetent) return ref;
+  if (prev < ref && inDetent) return ref;
+  if (prev < ref && v > ref && v <= hi + 1) return ref;
+
+  // Sticky detent while scrubbing inside the band (but allow nudging up from exactly 100 into boost).
+  if (inDetent && prev >= lo && prev <= hi && !(prev === ref && v > ref)) return ref;
+
+  if (prev <= ref && v > hi) return v;
+
+  return v;
+}
+
+function readBoostSessionFlag(): boolean {
+  return localStorage.getItem(VOLUME_BOOST_SESSION_KEY) === '1';
+}
+
+function setBoostSessionFlag(active: boolean) {
+  if (active) localStorage.setItem(VOLUME_BOOST_SESSION_KEY, '1');
+  else localStorage.removeItem(VOLUME_BOOST_SESSION_KEY);
+}
+
+/** Volume for a newly opened title (boost from the prior title does not carry over). */
+export function loadPlayerVolumeForNewSession(): { volume: number; muted: boolean } {
+  const { volume, muted } = loadPlayerVolume();
+  if (readBoostSessionFlag()) {
+    setBoostSessionFlag(false);
+    const reset = PLAYER_VOLUME_REFERENCE;
+    savePlayerVolume(reset, muted);
+    return { volume: reset, muted };
+  }
+  return { volume, muted };
+}
 
 function readJson<T>(key: string, fallback: T): T {
   try {
@@ -108,13 +167,22 @@ export function saveAudioPref(profileId: string, videoPath: string, trackId: num
 export function loadPlayerVolume(): { volume: number; muted: boolean } {
   const volume = Number(localStorage.getItem(VOLUME_KEY));
   return {
-    volume: Number.isFinite(volume) && localStorage.getItem(VOLUME_KEY) !== null ? Math.max(0, Math.min(100, volume)) : 100,
+    volume:
+      Number.isFinite(volume) && localStorage.getItem(VOLUME_KEY) !== null
+        ? clampPlayerVolume(volume)
+        : PLAYER_VOLUME_REFERENCE,
     muted: localStorage.getItem(MUTE_KEY) === '1',
   };
 }
 
 export function savePlayerVolume(volume: number, muted: boolean) {
-  localStorage.setItem(VOLUME_KEY, String(Math.round(volume)));
+  const v = clampPlayerVolume(volume);
+  if (v > PLAYER_VOLUME_REFERENCE) {
+    setBoostSessionFlag(true);
+  } else {
+    setBoostSessionFlag(false);
+    localStorage.setItem(VOLUME_KEY, String(v));
+  }
   localStorage.setItem(MUTE_KEY, muted ? '1' : '0');
 }
 
