@@ -111,9 +111,9 @@ export function AudioSubtitlePanel({
         </div>
       </div>
 
-      <div className="flex-1 min-w-0 flex flex-col">
-        <h4 className="px-6 pt-1 pb-2 text-sm font-bold text-white/60 uppercase tracking-wide">Subtitles</h4>
-        <div className="overflow-y-auto px-2 player-scroll flex-1">
+      <div className="flex-1 min-w-0 flex flex-col min-h-0">
+        <h4 className="px-6 pt-1 pb-2 text-sm font-bold text-white/60 uppercase tracking-wide shrink-0">Subtitles</h4>
+        <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-2 player-scroll">
           <Option selected={selectedSubtitleId === null} main="Off" onClick={() => onSelectSubtitle(null)} />
           {subtitleTracks.map((t) => {
             const { main, detail } = subtitleTrackLabel(t);
@@ -121,83 +121,86 @@ export function AudioSubtitlePanel({
               <Option key={t.id} selected={selectedSubtitleId === t.id} main={main} detail={detail} onClick={() => onSelectSubtitle(t.id)} />
             );
           })}
-
-          <div className="mt-3 pt-1 border-t border-white/10">
-            <button
-              type="button"
-              onClick={() => setAppearanceOpen((open) => !open)}
-              className="w-full flex items-center justify-between px-4 py-2.5 text-left rounded text-white/80 hover:text-white hover:bg-white/5 transition-colors"
-            >
-              <span className="text-sm font-bold">Appearance</span>
-              <ChevronDown className={`w-5 h-5 transition-transform duration-300 ease-in-out ${appearanceOpen ? 'rotate-180' : ''}`} />
-            </button>
-            <AnimatePresence initial={false}>
-              {appearanceOpen && (
-                <motion.div
-                  key="appearance"
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ duration: 0.25, ease: 'easeInOut' }}
-                  className="overflow-hidden"
-                >
-                  <div className="pb-2">
-                    <StyleRow
-                      label="Size"
-                      value={subtitleStyle.size}
-                      onChange={(size) => patchStyle({ size })}
-                      options={[
-                        { value: 'small', label: 'Small' },
-                        { value: 'default', label: 'Default' },
-                        { value: 'large', label: 'Large' },
-                      ]}
-                    />
-                    <StyleRow
-                      label="Color"
-                      value={subtitleStyle.color}
-                      onChange={(color) => patchStyle({ color })}
-                      options={[
-                        { value: 'white', label: 'White' },
-                        { value: 'yellow', label: 'Yellow' },
-                      ]}
-                    />
-                    <StyleRow
-                      label="Opacity"
-                      value={subtitleStyle.opacity}
-                      onChange={(opacity) => patchStyle({ opacity })}
-                      options={[
-                        { value: '100', label: '100%' },
-                        { value: '75', label: '75%' },
-                        { value: '50', label: '50%' },
-                      ]}
-                    />
-                    <StyleRow
-                      label="Background"
-                      value={subtitleStyle.background}
-                      onChange={(background) => patchStyle({ background })}
-                      options={[
-                        { value: 'none', label: 'None' },
-                        { value: 'outline', label: 'Outline' },
-                        { value: 'box', label: 'Box' },
-                      ]}
-                    />
-                    <StyleRow
-                      label="Position"
-                      value={subtitleStyle.position}
-                      onChange={(position) => patchStyle({ position })}
-                      options={[
-                        { value: 'default', label: 'Default' },
-                        { value: 'low', label: 'Lower' },
-                        { value: 'high', label: 'Higher' },
-                      ]}
-                    />
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
         </div>
-        <div className="px-2 pt-1 pb-3 mt-auto border-t border-white/10">
+
+        <div className="shrink-0 border-t border-white/10 pt-1 pb-1">
+          <button
+            type="button"
+            onClick={() => setAppearanceOpen((open) => !open)}
+            className="w-full flex items-center justify-between px-4 py-2.5 text-left rounded text-white/80 hover:text-white hover:bg-white/5 transition-colors"
+          >
+            <span className="text-sm font-bold">Appearance</span>
+            <ChevronDown
+              className={`w-5 h-5 transition-transform duration-300 ease-in-out ${appearanceOpen ? 'rotate-180' : ''}`}
+            />
+          </button>
+          <AnimatePresence initial={false}>
+            {appearanceOpen && (
+              <motion.div
+                key="appearance"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.25, ease: 'easeInOut' }}
+                className="overflow-hidden"
+              >
+                <div className="max-h-[min(220px,28vh)] overflow-y-auto player-scroll pb-2">
+                  <StyleRow
+                    label="Size"
+                    value={subtitleStyle.size}
+                    onChange={(size) => patchStyle({ size })}
+                    options={[
+                      { value: 'small', label: 'Small' },
+                      { value: 'default', label: 'Default' },
+                      { value: 'large', label: 'Large' },
+                    ]}
+                  />
+                  <StyleRow
+                    label="Color"
+                    value={subtitleStyle.color}
+                    onChange={(color) => patchStyle({ color })}
+                    options={[
+                      { value: 'white', label: 'White' },
+                      { value: 'yellow', label: 'Yellow' },
+                    ]}
+                  />
+                  <StyleRow
+                    label="Opacity"
+                    value={subtitleStyle.opacity}
+                    onChange={(opacity) => patchStyle({ opacity })}
+                    options={[
+                      { value: '100', label: '100%' },
+                      { value: '75', label: '75%' },
+                      { value: '50', label: '50%' },
+                    ]}
+                  />
+                  <StyleRow
+                    label="Background"
+                    value={subtitleStyle.background}
+                    onChange={(background) => patchStyle({ background })}
+                    options={[
+                      { value: 'none', label: 'None' },
+                      { value: 'outline', label: 'Outline' },
+                      { value: 'box', label: 'Box' },
+                    ]}
+                  />
+                  <StyleRow
+                    label="Position"
+                    value={subtitleStyle.position}
+                    onChange={(position) => patchStyle({ position })}
+                    options={[
+                      { value: 'default', label: 'Default' },
+                      { value: 'low', label: 'Lower' },
+                      { value: 'high', label: 'Higher' },
+                    ]}
+                  />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        <div className="px-2 pt-1 pb-3 shrink-0 border-t border-white/10">
           <button
             onClick={onImportSubtitle}
             className="w-full flex items-center gap-3 px-4 py-2.5 text-left rounded text-white/60 hover:text-white hover:bg-white/5 transition-colors"

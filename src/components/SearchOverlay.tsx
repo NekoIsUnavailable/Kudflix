@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Search, X } from 'lucide-react';
+import { Search, Shuffle, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { VideoCard, getVideoWatched, type LocalFile } from './NetflixUI';
 import { cardProgress } from '../utils/grouping';
@@ -11,6 +11,7 @@ import {
   getItemSearchGenres,
   DEFAULT_CATALOG_FILTERS,
   type CatalogFilters,
+  type MediaTypeFilter,
 } from '../utils/catalogFilters';
 
 function getSearchText(file: LocalFile): string {
@@ -39,6 +40,7 @@ export function SearchOverlay({
   progresses = {},
   activeProfileId,
   watchedIndicatorMode = 'always',
+  initialMediaType = 'all',
 }: {
   files: LocalFile[];
   onClose: () => void;
@@ -47,9 +49,14 @@ export function SearchOverlay({
   progresses?: Record<string, number>;
   activeProfileId?: string | null;
   watchedIndicatorMode?: Settings['watchedIndicatorMode'];
+  /** Match Movies / TV tab when opening search so the grid and Play random stay in sync. */
+  initialMediaType?: MediaTypeFilter;
 }) {
   const [query, setQuery] = useState('');
-  const [filters, setFilters] = useState<CatalogFilters>(DEFAULT_CATALOG_FILTERS);
+  const [filters, setFilters] = useState<CatalogFilters>(() => ({
+    ...DEFAULT_CATALOG_FILTERS,
+    mediaType: initialMediaType,
+  }));
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -65,12 +72,20 @@ export function SearchOverlay({
 
   const availableGenres = useMemo(() => collectGenres(files), [files]);
 
-  const results = useMemo(() => {
+  /** Same list rendered in the grid (search text + sidebar filters). */
+  const displayedVideos = useMemo(() => {
     const q = query.trim().toLowerCase();
     let list = q ? files.filter((f) => getSearchText(f).includes(q)) : files;
     list = applyCatalogFilters(list, filters, progresses, activeProfileId);
     return list;
   }, [files, query, filters, progresses, activeProfileId]);
+
+  const playRandom = () => {
+    if (displayedVideos.length === 0) return;
+    const pick = displayedVideos[Math.floor(Math.random() * displayedVideos.length)];
+    onClose();
+    onPlay(pick);
+  };
 
   return (
     <AnimatePresence>
@@ -111,6 +126,15 @@ export function SearchOverlay({
                 </button>
               )}
             </div>
+            {displayedVideos.length > 0 && (
+              <button
+                type="button"
+                onClick={playRandom}
+                className="ml-3 flex items-center gap-2 bg-white text-black px-3 py-2 rounded font-bold text-sm hover:bg-white/80 transition shrink-0"
+              >
+                <Shuffle className="w-4 h-4" /> Play random
+              </button>
+            )}
             <button
               onClick={onClose}
               className="ml-3 p-2 text-gray-400 hover:text-white transition flex-shrink-0"
@@ -125,7 +149,7 @@ export function SearchOverlay({
             <SearchFilterSidebar filters={filters} onChange={setFilters} genres={availableGenres} />
 
             <div className="flex-1 overflow-y-auto px-6 md:px-10 pl-10 md:pl-14 pb-10 pt-4 min-h-0 overscroll-contain">
-              {results.length === 0 ? (
+              {displayedVideos.length === 0 ? (
                 <p className="text-gray-500 text-lg mt-8">
                   {query ? `No results for "${query}"` : 'No titles match your filters'}
                 </p>
@@ -134,19 +158,19 @@ export function SearchOverlay({
                 <p className="text-sm text-gray-400 font-medium pt-12 pb-1 tracking-wide">
                   {query.trim() ? (
                     <>
-                      <span className="text-gray-300">{results.length}</span>
-                      {' '}result{results.length !== 1 ? 's' : ''} for &ldquo;{query.trim()}&rdquo;
+                      <span className="text-gray-300">{displayedVideos.length}</span>
+                      {' '}result{displayedVideos.length !== 1 ? 's' : ''} for &ldquo;{query.trim()}&rdquo;
                     </>
                   ) : (
                     <>
-                      Showing <span className="text-gray-300">{results.length}</span>
-                      {' '}title{results.length !== 1 ? 's' : ''}
+                      Showing <span className="text-gray-300">{displayedVideos.length}</span>
+                      {' '}title{displayedVideos.length !== 1 ? 's' : ''}
                     </>
                   )}
                 </p>
                 <div className="pt-32 pl-4 pr-6 pb-12 overflow-visible">
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-x-4 gap-y-20 overflow-visible">
-                  {results.map((video, i) => (
+                  {displayedVideos.map((video, i) => (
                     <div key={`${video.path}-${i}`} className="relative hover:z-[600] overflow-visible">
                       <VideoCard
                         video={video}

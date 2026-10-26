@@ -10,7 +10,7 @@ export interface MovieMeta {
 
 /** Known release / codec / group tokens, stripped when they appear after the title. */
 const RELEASE_TAGS =
-  /\b(?:2160p|1080p|720p|480p|4320p|4k|8k|uhd|fhd|hd|sd|bluray|blu-ray|brrip|bdrip|web-?dl|webrip|web-?rip|hdrip|dvdrip|hdtv|tvrip|cam|x264|x265|hevc|h264|h265|h\.?\s*265|h\.?\s*264|avc|10bit|8bit|12bit|aac|aac\d+(?:\.\d+)?|ddp\d*(?:\.\d+)?|dd\+?|dts|truehd|atmos|ma|5\.1|7\.1|2\.0|remux|proper|repack|extended|unrated|hdr10\+?|hdr|dovi|dv|sdr|nf|amzn|atvp|yts|yify|rarbg|hmax|dsnp|pcok|max|internal|limited|custom|subbed|dubbed|english|joy|flux|afm72|gige|h4xo)\b/gi;
+  /\b(?:2160p|1080p|720p|480p|4320p|4k|8k|uhd|fhd|hd|sd|hq|bluray|blu-ray|brrip|bdrip|web-?dl|webrip|web-?rip|hdrip|dvdrip|hdtv|tvrip|cam|x264|x265|hevc|h264|h265|h\.?\s*265|h\.?\s*264|avc|10bit|8bit|12bit|aac|aac\d+(?:\.\d+)?|ddp\d*(?:\.\d+)?|ddp|dd\+?|dts|truehd|atmos|ma|5\.1|7\.1|2\.0|remux|proper|repack|extended|unrated|hdr10\+?|hdr|dovi|dv|sdr|nf|amzn|atvp|yts|yify|rarbg|hmax|dsnp|pcok|max|internal|limited|custom|subbed|dubbed|english|joy|flux|afm72|gige|h4xo|ntb)\b/gi;
 
 const EDITION_TAGS =
   /\b(?:uncut|theatrical\s*cut|extended\s*(?:cut|edition)|directors?\s*cut|final\s*cut|unrated\s*cut|special\s*edition|ultimate\s*edition|collectors?\s*edition|anniversary\s*edition|remastered|criterion\s*collection)\b/gi;
@@ -56,10 +56,10 @@ export function parseSeriesFolderName(folderName: string): { title: string; year
     return { title: parenMatch[1].trim(), year: parenMatch[2] };
   }
   const parsed = parseFilenameMeta(`${trimmed}.folder`);
-  if (parsed.year) {
-    return { title: parsed.title, year: parsed.year };
-  }
-  return { title: trimmed, year: '' };
+  return {
+    title: parsed.title || trimmed,
+    year: parsed.year,
+  };
 }
 
 function stripFromReleaseYear(name: string, year: string): string {
@@ -86,6 +86,9 @@ function stripFromReleaseYear(name: string, year: string): string {
 function stripReleaseClutter(name: string, year: string): string {
   let result = stripFromReleaseYear(name, year);
 
+  // Strip dotted audio tokens before spaces split "DDP5.1" → "DDP5 1".
+  result = result.replace(/\bddp\d*(?:\.\d+)?\b/gi, ' ');
+
   // Dot-separated titles (Spider-Man.Brand.New.Day) must become words before tag/group stripping.
   result = result.replace(/[._-]+/g, ' ');
 
@@ -94,6 +97,10 @@ function stripReleaseClutter(name: string, year: string): string {
     .replace(/\([^)]*\)/g, ' ')
     .replace(GROUP_SUFFIX, ' ')
     .replace(RELEASE_TAGS, ' ')
+    .replace(/\bweb\s*-?\s*dl\b/gi, ' ')
+    .replace(/\bddp\s*\d+(?:\s*\d+)?\b/gi, ' ')
+    // Season-pack folders (Cyberpunk.Edgerunners.S02.2160p…) — not S02E03 episode codes.
+    .replace(/\bS(?:(?:eason)?\s*)?\d{1,2}\b(?!\s*E\s*\d)/gi, ' ')
     .replace(EDITION_TAGS, ' ');
 
   if (year) {
@@ -111,10 +118,12 @@ function stripReleaseClutter(name: string, year: string): string {
 
 function stripEpisodePart(raw: string): string {
   let s = raw;
+  s = s.replace(/\bddp\d*(?:\.\d+)?\b/gi, ' ');
   s = s.replace(/\([^)]*(?:1080p|2160p|720p|480p|bluray|webrip|web-?dl|x265|x264|h265|h\.?\s*265)[^)]*\)/gi, ' ');
   s = s.replace(/\[[^\]]*\]/g, ' ');
   s = s.replace(GROUP_SUFFIX, ' ');
   s = s.replace(RELEASE_TAGS, ' ');
+  s = s.replace(/\bweb\s*-?\s*dl\b/gi, ' ');
   s = s.replace(EDITION_TAGS, ' ');
   s = s.replace(/[._-]+/g, ' ');
   s = s.replace(/\b\d\s+\d\b/g, ' ');

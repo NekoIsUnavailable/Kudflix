@@ -1,6 +1,6 @@
 import type { LocalFile } from '../components/NetflixUI';
 import { getPlayerDisplayTitle } from './displayTitle';
-import { getSeriesRoot } from './grouping';
+import { getSeriesRootFromFile } from './grouping';
 import { hasPartialProgress, isWatched } from './watched';
 
 export type CandidateStatus = 'watched' | 'partial';
@@ -62,7 +62,7 @@ export function collectWatchHistoryCandidates(
 
     const { position, duration, completed } = resolvePositionAndDuration(file, progresses, watched);
     const isTv = file.category === 'tv';
-    const root = isTv ? getSeriesRoot(file.relativePath) : null;
+    const root = isTv ? getSeriesRootFromFile(file) : null;
     const seriesTitle = isTv && root ? getPlayerDisplayTitle(file) : null;
 
     out.push({

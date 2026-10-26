@@ -5,6 +5,72 @@ const fs = require('fs');
 const { app } = require('electron');
 
 const STATE_EMIT_INTERVAL_MS = 200;
+const MPV_VOLUME_MAX = 150;
+
+function clampMpvVolume(value) {
+  return Math.max(0, Math.min(MPV_VOLUME_MAX, Math.round(Number(value) || 0)));
+}
+
+/** Scene/Plex-style release names: `.DV.HEVC`, `.DoVi.HDR`, etc. */
+function isDolbyVisionRelease(filePath) {
+  const name = path.basename(filePath || '');
+  return /\.(?:DV|DoVi)(?:\.|[._-]|$)/i.test(name);
+}
+
+/** VO / hwdec flags tuned for embedded --wid playback (Windows compositing is picky). */
+function mpvRenderArgs(filePath) {
+  // gpu-next (libplacebo) handles HDR10 / Dolby Vision tone mapping; legacy gpu + DV often tints green.
+  const args = ['--vo=gpu-next'];
+  if (process.platform === 'win32') {
+    args.push('--gpu-context=d3d11');
+    const forceSw =
+      process.env.KUDFLIX_MPV_HWDEC === 'no' || isDolbyVisionRelease(filePath);
+    // D3D11 VA on some HEVC DV rips skips RPU reshaping → green/purple; SW decode fixes that.
+    args.push(forceSw ? '--hwdec=no' : '--hwdec=d3d11va-copy');
+  } else {
+    args.push('--hwdec=auto-copy');
+  }
+  return args;
+}
+
+/** Map HDR / DV (e.g. NF WEB-DL HEVC) to SDR for the non-HDR Electron player surface. */
+function mpvSdrOutputArgs(filePath) {
+  const dolbyVision = isDolbyVisionRelease(filePath);
+  const peakOverride = process.env.KUDFLIX_MPV_TARGET_PEAK;
+  const targetPeak =
+    peakOverride && /^\d+$/.test(peakOverride) ? peakOverride : '203';
+
+  const args = [
+    // bt.2446a can tint DV P5 green; spline holds contrast well on other HDR.
+    dolbyVision ? '--tone-mapping=bt.2390' : '--tone-mapping=spline',
+    '--hdr-compute-peak=yes',
+    '--hdr-contrast-recovery=0.45',
+    '--tone-mapping-max-boost=1.15',
+    // Tone-map luminance to SDR; squeezing into bt.709 gamut reads flat/washed on most rips.
+    '--gamut-mapping-mode=clip',
+    '--target-prim=bt.2020',
+    '--target-trc=bt.1886',
+    `--target-peak=${targetPeak}`,
+    '--target-colorspace-hint=auto',
+    '--target-colorspace-hint-mode=target',
+    // Full-range SDR plays nicer with DWM + embedded rgba swap chains than TV limited.
+    '--video-output-levels=full',
+    '--inverse-tone-mapping=no',
+    '--sdr-adjust-gamma=auto',
+  ];
+  return args;
+}
+
+/** Scaling, banding, and display calibration (after SDR/color args so tone map settings win). */
+function mpvQualityArgs() {
+  return [
+    '--profile=gpu-hq',
+    '--deband',
+    '--deband-iterations=2',
+    '--icc-profile-auto',
+    '--dither=error-diffusion',
+  ];
+}
 
 const OBSERVED_PROPERTIES = [
   'time-pos',
@@ -164,8 +230,9 @@ class MpvController {
       '--keep-open=yes',
       '--idle=yes',
       '--force-window=yes',
-      '--hwdec=auto-safe',
-      '--vo=gpu',
+      ...mpvRenderArgs(filePath),
+      ...mpvSdrOutputArgs(filePath),
+      ...mpvQualityArgs(),
       '--background-color=#000000',
       '--hr-seek=yes',
       '--cache=yes',
@@ -182,7 +249,8 @@ class MpvController {
       '--sub-margin-y=48',
       '--sub-auto=no',
       `--input-ipc-server=${pipeName}`,
-      `--volume=${Math.round(options.volume ?? 100)}`,
+      `--volume-max=${MPV_VOLUME_MAX}`,
+      `--volume=${clampMpvVolume(options.volume ?? 100)}`,
     ];
 
     const ytDlpPath = getYtDlpExecutablePath();
@@ -332,6 +400,11 @@ class MpvController {
         // CLI --start can leave embedded video (wid) stuck on a still frame until a seek;
         // re-seek after load refreshes decoding and A/V sync.
         await this.command(['seek', resume, 'absolute+exact']);
+      } else {
+        const pos = await this.getProperty('time-pos').catch(() => 0);
+        if (typeof pos === 'number' && pos > 2) {
+          await this.command(['seek', 0, 'absolute+exact']);
+        }
       }
       await this.setProperty('pause', false);
     } catch (err) {
@@ -435,7 +508,7 @@ class MpvController {
       // optional recovery
     }
     await this.setProperty('mute', false);
-    await this.setProperty('volume', Math.max(0, Math.min(100, this.state.volume ?? 100)));
+    await this.setProperty('volume', clampMpvVolume(this.state.volume ?? 100));
     return undefined;
   }
 
@@ -446,7 +519,7 @@ class MpvController {
       case 'pause': return this.setProperty('pause', true);
       case 'seek': return this.command(['seek', value, 'relative+exact']);
       case 'seek-absolute': return this.command(['seek', value, 'absolute+exact']);
-      case 'volume': return this.setProperty('volume', Math.max(0, Math.min(100, value)));
+      case 'volume': return this.setProperty('volume', clampMpvVolume(value));
       case 'mute': return this.setProperty('mute', Boolean(value));
       case 'speed': return this.setProperty('speed', value);
       case 'audio-track': return this.switchAudioTrack(value);

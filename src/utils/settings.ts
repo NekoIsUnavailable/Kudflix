@@ -43,6 +43,7 @@ const DEFAULT_SETTINGS: Settings = {
   externalPlayerPath: '',
   movieFolders: [],
   tvFolders: [],
+  tvParentFolders: [],
   animeFolders: [],
   skipProfilePicker: false,
   defaultProfileId: null,
@@ -52,7 +53,8 @@ const DEFAULT_SETTINGS: Settings = {
   watchedIndicatorMode: 'always' as const,
   detailModalActionsMode: 'menu' as const,
   discordRpcEnabled: true,
-  discordActivityStyle: 'media' as const,
+  discordActivityStyle: 'watching' as const,
+  watchOnlineNav: 'text' as const,
 };
 
 export function loadSettings(): Settings {
@@ -80,6 +82,9 @@ export function loadSettings(): Settings {
         externalPlayerPath: parsed.externalPlayerPath ?? '',
         movieFolders,
         tvFolders: parsed.tvFolders ?? [],
+        tvParentFolders: Array.isArray(parsed.tvParentFolders)
+          ? parsed.tvParentFolders.filter((p: unknown): p is string => typeof p === 'string')
+          : [],
         animeFolders: parsed.animeFolders ?? [],
         skipProfilePicker: parsed.skipProfilePicker ?? false,
         defaultProfileId: parsed.defaultProfileId ?? null,
@@ -93,9 +98,17 @@ export function loadSettings(): Settings {
         detailModalActionsMode: parsed.detailModalActionsMode === 'icons' ? 'icons' : 'menu',
         discordRpcEnabled: parsed.discordRpcEnabled ?? true,
         discordActivityStyle:
-          parsed.discordActivityStyle === 'watching' || parsed.discordActivityStyle === 'playing'
+          parsed.discordActivityStyle === 'media' || parsed.discordActivityStyle === 'playing'
             ? parsed.discordActivityStyle
-            : 'media',
+            : 'watching',
+        watchOnlineNav:
+          parsed.watchOnlineNav === 'icon' || parsed.watchOnlineNav === 'hidden' || parsed.watchOnlineNav === 'text'
+            ? parsed.watchOnlineNav
+            : parsed.hideWatchOnlineTab
+              ? 'hidden'
+              : parsed.watchOnlineAsIcon
+                ? 'icon'
+                : 'text',
       };
     }
 

@@ -37,6 +37,18 @@ export const DETAIL_MODAL_ACTIONS_OPTIONS: ThemedSelectOption<'icons' | 'menu'>[
   { value: 'icons', label: 'Icons only' },
 ];
 
+export const WATCH_ONLINE_NAV_OPTIONS: ThemedSelectOption<'text' | 'icon' | 'hidden'>[] = [
+  { value: 'text', label: 'Text tab' },
+  { value: 'icon', label: 'Icon' },
+  { value: 'hidden', label: 'Hidden' },
+];
+
+export const DISCORD_ACTIVITY_STYLE_OPTIONS: ThemedSelectOption<'watching' | 'media' | 'playing'>[] = [
+  { value: 'watching', label: 'Watching (progress bar)' },
+  { value: 'media', label: 'Listening (progress bar)' },
+  { value: 'playing', label: 'Playing' },
+];
+
 export function ThemedSelect<T extends string>({
   value,
   onChange,

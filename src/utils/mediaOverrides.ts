@@ -10,6 +10,8 @@ export interface MediaOverride {
   provider?: 'tmdb' | 'anilist';
   disableTmdb?: boolean;
   useSeriesThumbnailForEpisodes?: boolean;
+  /** Next-episode UI appears this many seconds before end. */
+  outroSkipSeconds?: number;
 }
 
 const STORAGE_KEY = 'netflix_media_overrides';
@@ -37,6 +39,14 @@ export function saveMediaOverride(path: string, override: MediaOverride): void {
   if ('anilistId' in override) {
     if (override.anilistId) merged.anilistId = override.anilistId;
     else delete merged.anilistId;
+  }
+  delete (merged as Record<string, unknown>).introSkipSeconds;
+  if ('outroSkipSeconds' in override) {
+    if (override.outroSkipSeconds != null && override.outroSkipSeconds > 0) {
+      merged.outroSkipSeconds = override.outroSkipSeconds;
+    } else {
+      delete merged.outroSkipSeconds;
+    }
   }
   all[path] = merged;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(all));

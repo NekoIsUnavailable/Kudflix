@@ -256,6 +256,16 @@ export function updateWatchHistoryWatchedAt(
   return true;
 }
 
+export async function removeWatchHistoryEntry(profileId: string, entryId: string): Promise<boolean> {
+  const list = readList(profileId);
+  const idx = list.findIndex((e) => e.id === entryId);
+  if (idx < 0) return false;
+  const [removed] = list.splice(idx, 1);
+  if (removed?.thumbnailKey) await deleteWatchHistoryThumb(removed.thumbnailKey);
+  writeList(profileId, list);
+  return true;
+}
+
 export async function clearWatchHistory(profileId: string): Promise<void> {
   const list = readList(profileId);
   for (const entry of list) {

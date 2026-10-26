@@ -131,6 +131,32 @@ html:not(.player-window) body::before {
   box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
 }
 
+/* Volume: transparent track; fill drawn by VolumeSlider segments underneath */
+.player-volume-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 100%;
+  background: transparent;
+  outline: none;
+  margin: 0;
+}
+.player-volume-range::-webkit-slider-runnable-track {
+  height: 4px;
+  background: transparent;
+}
+.player-volume-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+}
+.player-volume-range:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.9), 0 0 4px rgba(0, 0, 0, 0.5);
+}
+
 .player-scroll::-webkit-scrollbar {
   width: 6px;
 }
